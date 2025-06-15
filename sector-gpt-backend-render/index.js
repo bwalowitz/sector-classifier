@@ -14,10 +14,8 @@ app.post('/classify', async (req, res) => {
   if (!companyName) return res.status(400).json({ error: 'Missing company name' });
 
   try {
-    // Get description using SerpAPI
-    const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(
-      companyName
-    )}&api_key=${process.env.SERPAPI_KEY}`;
+    // Step 1: Get description using SerpAPI
+    const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(companyName)}&api_key=${process.env.SERPAPI_KEY}`;
     const serpResponse = await axios.get(serpUrl);
     const organicResults = serpResponse.data.organic_results || [];
     const description =
@@ -25,7 +23,9 @@ app.post('/classify', async (req, res) => {
       organicResults[0]?.snippet ||
       'No description found.';
 
-    // Load classification rules from your Gist
+    console.log('🔍 SerpAPI Description:', description);
+
+    // Step 2: Load classification rules from Gist
     const gistRes = await axios.get(process.env.GIST_URL);
     const rules = gistRes.data;
 
@@ -44,6 +44,9 @@ Confidence: [0.0-1.0]
 Product Focus: [product]
 Reasoning: [brief explanation]`;
 
+    console.log('🧠 OpenAI Prompt Sent:', prompt);
+
+    // Step 3: Send to OpenAI
     const openaiRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -63,6 +66,8 @@ Reasoning: [brief explanation]`;
     );
 
     const content = openaiRes.data.choices[0].message.content;
+    console.log('📦 OpenAI Raw Output:', content);
+
     const result = {
       company_name: companyName,
       city: extract(content, 'City'),
@@ -76,7 +81,7 @@ Reasoning: [brief explanation]`;
     result.formatted_output = `${companyName} based out of ${result.city}, ${result.state} falls into the ${result.sector} sector.`;
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error('❌ Error during classification:', err);
     res.status(500).json({ error: err.message || 'Unknown error' });
   }
 });
