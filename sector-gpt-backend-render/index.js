@@ -14,11 +14,10 @@ app.post('/classify', async (req, res) => {
   if (!companyName) return res.status(400).json({ error: 'Missing company name' });
 
   try {
-    // ✅ Correct SerpAPI request format (no Authorization header!)
+    // Get description using SerpAPI
     const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(
       companyName
     )}&api_key=${process.env.SERPAPI_KEY}`;
-    
     const serpResponse = await axios.get(serpUrl);
     const organicResults = serpResponse.data.organic_results || [];
     const description =
@@ -26,12 +25,25 @@ app.post('/classify', async (req, res) => {
       organicResults[0]?.snippet ||
       'No description found.';
 
-    // ✅ Pull system prompt from Gist
+    // Load classification rules from your Gist
     const gistRes = await axios.get(process.env.GIST_URL);
     const rules = gistRes.data;
-    const prompt = `${rules.system_prompt}\n\nCompany Description:\n${description}\n\nClassify this company based on what it produces. Return only:\nSector: [sector]\nCity: [city]\nState: [state]\nConfidence: [0.0-1.0]\nProduct Focus: [product]\nReasoning: [brief explanation]`;
 
-    // ✅ Call OpenAI with clean prompt
+    const prompt = `${rules.system_prompt}
+
+IMPORTANT: You must classify using ONLY the 11 predefined sectors from the list in the rules. Do NOT invent or reword any sectors.
+
+Company Description:
+${description}
+
+Classify this company based on what it PRODUCES (not how it markets or sells). Respond only in this format:
+Sector: [one of the 11 exact sector names]
+City: [city]
+State: [state]
+Confidence: [0.0-1.0]
+Product Focus: [product]
+Reasoning: [brief explanation]`;
+
     const openaiRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
