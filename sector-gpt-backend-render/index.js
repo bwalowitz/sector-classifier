@@ -10,7 +10,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 app.post('/classify', async (req, res) => {
-  const { companyName } = req.body;
+  const { companyName, description = '', cityState = '' } = req.body;
   if (!companyName) return res.status(400).json({ error: 'Missing company name' });
 
   try {
@@ -18,33 +18,44 @@ app.post('/classify', async (req, res) => {
     const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(companyName)}&api_key=${process.env.SERPAPI_KEY}`;
     const serpResponse = await axios.get(serpUrl);
     const organicResults = serpResponse.data.organic_results || [];
-    const description =
+    const fetchedDescription =
       organicResults.find(r => r.snippet)?.snippet ||
       organicResults[0]?.snippet ||
       'No description found.';
 
-    console.log('🔍 SerpAPI Description:', description);
+    const finalDescription = description || fetchedDescription;
+
+    console.log('🔍 SerpAPI Description:', finalDescription);
 
     // Step 2: Load classification rules from Gist
     const gistRes = await axios.get(process.env.GIST_URL);
-    const rules = gistRes.data;
+    const rulesText = gistRes.data;
 
-    const prompt = `${rules.system_prompt}
+    // System prompt = strict instructions + rules file
+    const SYSTEM_PROMPT = `
+IMPORTANT: If you ever classify a company using a sector name not included in the uploaded list (e.g., “Transportation & Logistics”), STOP and reply with:
+> This classification is invalid. Please start a new chat and reenter the company name.
 
-IMPORTANT: You must classify using ONLY the 11 predefined sectors from the list in the rules. Do NOT invent or reword any sectors.
+You must match exactly one of the 11 approved sectors in the uploaded file. Any deviation is a failure.
 
-Company Description:
-${description}
+Only respond to valid company classification requests.  
+If the input is casual, irrelevant, unclear, or appears to be part of a broken chat thread, respond only with:
 
-Classify this company based on what it PRODUCES (not how it markets or sells). Respond only in this format:
-Sector: [one of the 11 exact sector names]
-City: [city]
-State: [state]
-Confidence: [0.0-1.0]
-Product Focus: [product]
-Reasoning: [brief explanation]`;
+> Your chat appears to be corrupted or unclear. Please start a new chat and provide a valid company name, optionally with its city and state.
 
-    console.log('🧠 OpenAI Prompt Sent:', prompt);
+If the user expresses doubt (e.g., “Are you sure?”, “You classified this differently before...”), respond only with:
+
+> This chat may be corrupted. Please start a new chat for accurate results.
+
+Do not attempt to reclassify, explain, or justify within the same chat.
+
+${rulesText}`.trim();
+
+    // User message
+    const userPrompt = `Company: ${companyName}${finalDescription ? `\nDescription: ${finalDescription}` : ''}${cityState ? `\nLocation: ${cityState}` : ''}`;
+
+    console.log('🧠 SYSTEM PROMPT:', SYSTEM_PROMPT);
+    console.log('👤 USER PROMPT:', userPrompt);
 
     // Step 3: Send to OpenAI
     const openaiRes = await axios.post(
@@ -52,8 +63,8 @@ Reasoning: [brief explanation]`;
       {
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: rules.system_prompt },
-          { role: 'user', content: prompt }
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt }
         ],
         temperature: 0.1
       },
@@ -67,11 +78,11 @@ Reasoning: [brief explanation]`;
 
     console.log('🧠 Full OpenAI response:', JSON.stringify(openaiRes.data, null, 2));
 
-if (!openaiRes.data.choices || !openaiRes.data.choices[0] || !openaiRes.data.choices[0].message) {
-  throw new Error("⚠️ OpenAI API returned no usable choices. Raw output logged above.");
-}
+    if (!openaiRes.data.choices || !openaiRes.data.choices[0] || !openaiRes.data.choices[0].message) {
+      throw new Error("⚠️ OpenAI API returned no usable choices. Raw output logged above.");
+    }
 
-const content = openaiRes.data.choices[0].message.content;
+    const content = openaiRes.data.choices[0].message.content;
 
     console.log('📦 OpenAI Raw Output:', content);
 
