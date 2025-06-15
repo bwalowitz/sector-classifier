@@ -65,7 +65,14 @@ Reasoning: [brief explanation]`;
       }
     );
 
-    const content = openaiRes.data.choices[0].message.content;
+    console.log('🧠 Full OpenAI response:', JSON.stringify(openaiRes.data, null, 2));
+
+if (!openaiRes.data.choices || !openaiRes.data.choices[0] || !openaiRes.data.choices[0].message) {
+  throw new Error("⚠️ OpenAI API returned no usable choices. Raw output logged above.");
+}
+
+const content = openaiRes.data.choices[0].message.content;
+
     console.log('📦 OpenAI Raw Output:', content);
 
     const result = {
