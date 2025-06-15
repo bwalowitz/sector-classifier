@@ -14,7 +14,11 @@ app.post('/classify', async (req, res) => {
   if (!companyName) return res.status(400).json({ error: 'Missing company name' });
 
   try {
-    const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(companyName)}&api_key=${process.env.SERPAPI_KEY}`;
+    // ✅ Correct SerpAPI request format (no Authorization header!)
+    const serpUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(
+      companyName
+    )}&api_key=${process.env.SERPAPI_KEY}`;
+    
     const serpResponse = await axios.get(serpUrl);
     const organicResults = serpResponse.data.organic_results || [];
     const description =
@@ -22,34 +26,29 @@ app.post('/classify', async (req, res) => {
       organicResults[0]?.snippet ||
       'No description found.';
 
+    // ✅ Pull system prompt from Gist
     const gistRes = await axios.get(process.env.GIST_URL);
     const rules = gistRes.data;
-    const prompt = `${rules.system_prompt}
+    const prompt = `${rules.system_prompt}\n\nCompany Description:\n${description}\n\nClassify this company based on what it produces. Return only:\nSector: [sector]\nCity: [city]\nState: [state]\nConfidence: [0.0-1.0]\nProduct Focus: [product]\nReasoning: [brief explanation]`;
 
-Company Description:
-${description}
-
-Classify this company based on what it produces. Return only:
-Sector: [sector]
-City: [city]
-State: [state]
-Confidence: [0.0-1.0]
-Product Focus: [product]
-Reasoning: [brief explanation]`;
-
-    const openaiRes = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: rules.system_prompt },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.1
-    }, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_KEY}`,
-        'Content-Type': 'application/json'
+    // ✅ Call OpenAI with clean prompt
+    const openaiRes = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: rules.system_prompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.1
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_KEY}`,
+          'Content-Type': 'application/json'
+        }
       }
-    });
+    );
 
     const content = openaiRes.data.choices[0].message.content;
     const result = {
